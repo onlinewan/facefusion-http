@@ -7,12 +7,12 @@ from time import time
 import numpy
 
 from facefusion import content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, logger, process_manager, state_manager, voice_extractor, wording
-from facefusion.args import apply_args, collect_job_args, reduce_job_args, reduce_step_args
+from facefusion.args import apply_args, collect_job_args, reduce_job_args, reduce_step_args, collect_step_args
 from facefusion.common_helper import get_first
 from facefusion.content_analyser import analyse_image, analyse_video
 from facefusion.download import conditional_download_hashes, conditional_download_sources
 from facefusion.exit_helper import conditional_exit, graceful_exit, hard_exit
-from facefusion.face_analyser import get_average_face, get_many_faces, get_one_face
+from facefusion.face_analyser import get_average_face, get_many_faces, get_one_face, get_face_info
 from facefusion.face_selector import sort_and_filter_faces
 from facefusion.face_store import append_reference_face, clear_reference_faces, get_reference_faces
 from facefusion.ffmpeg import copy_image, extract_frames, finalize_image, merge_video, replace_audio, restore_audio
@@ -26,12 +26,107 @@ from facefusion.program_helper import validate_args
 from facefusion.statistics import conditional_log_statistics
 from facefusion.temp_helper import clear_temp_directory, create_temp_directory, get_temp_file_path, get_temp_frame_paths, move_temp_file
 from facefusion.typing import Args, ErrorCode
-from facefusion.vision import get_video_frame, pack_resolution, read_image, read_static_images, restrict_image_resolution, restrict_trim_frame, restrict_video_fps, restrict_video_resolution, unpack_resolution
+from facefusion.vision import get_video_frame, pack_resolution, read_image, read_static_image, read_static_images, restrict_image_resolution, restrict_trim_frame, restrict_video_fps, restrict_video_resolution, unpack_resolution
 
+# http server start ---------------------------------
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn
+import threading
+import json
+
+fastApp = FastAPI()
+
+lockSwapFaceAPI = threading.Lock()
+
+@fastApp.get("/api/getfaceinfo")
+async def getfaceinfobyHttp(request: Request):
+	print("http request getfaceinfo..")
+
+	source_path = request.query_params.get('source_path')
+
+	if source_path and len(source_path) != 0:	
+		source_frame = read_static_image(source_path)
+		face = get_face_info(source_frame)
+		if face is not None:
+			face_json = {"gender": face.gender, "age": face.age[0], "race": face.race}
+			print("face is not None. face:" + str(face_json))
+
+			return JSONResponse(content={"status": "success", "msg": face_json})
+	else:
+		print("source_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空或没有人脸"})	
+
+@fastApp.get("/api/swapface")
+async def swapfacebyHttp(request: Request):
+	print("http request swapface..")
+	if lockSwapFaceAPI.acquire(timeout=0) is False:
+		return JSONResponse(content={"status": "failed", "msg":"上一个任务还没有执行完，请稍后再试"})
+	
+	try:
+		return await _swapfacebyHttp(request)
+	finally:
+		lockSwapFaceAPI.release()
+		
+
+async def _swapfacebyHttp(request: Request):
+	print("call _swapfacebyHttp...")
+
+	source_path = request.query_params.get('source_path')
+	target_path = request.query_params.get('target_path')
+	output_path = request.query_params.get('output_path')
+
+
+	if source_path and len(source_path) != 0:
+		state_manager.set_item('source_paths', [source_path])
+	else:
+		print("source_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空"})	
+	if target_path and len(target_path) != 0:
+		state_manager.set_item('target_path', target_path)
+	else:
+		print("target_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"target_path 不能为空"})
+	if output_path and len(output_path) != 0:
+		state_manager.set_item('output_path', output_path)
+	else:
+		print("output_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"output_path 不能为空"})
+
+	clear_reference_faces()
+	step_args = collect_step_args()
+	step_args.update(collect_job_args())
+	apply_args(step_args, state_manager.set_item)
+
+	print("clear_reference_faces.  apply_args")
+	print(step_args)
+
+	try:
+		error_code = conditional_process()
+		if error_code == 0:
+			print("conditional_process success")
+			return JSONResponse(content={"status": "success", "msg":""})
+		else:
+			print("conditional_process return:" + error_code)
+			return JSONResponse(content={"status": "failed", "msg":"conditional_process return:" + error_code})
+	except Exception as e: 
+		print("conditinal_process exception:" + str(e))
+		return JSONResponse(content={"status": "failed", "msg":"conditinal_process exception:" + str(e)})
+
+
+def run_server():
+    uvicorn.run(fastApp, host="127.0.0.1", port=8000, log_level="info")
+
+def start_background_tasks():
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    print("server_thread.start()")
+
+# http server end ===================================
 
 def cli() -> None:
 	signal.signal(signal.SIGINT, lambda signal_number, frame: graceful_exit(0))
-	program = create_program()
+	program = create_program()	
 
 	if validate_args(program):
 		args = vars(program.parse_args())
@@ -68,8 +163,12 @@ def route(args : Args) -> None:
 		for ui_layout in ui.get_ui_layouts_modules(state_manager.get_item('ui_layouts')):
 			if not ui_layout.pre_check():
 				return conditional_exit(2)
+		
 		ui.init()
-		ui.launch()
+		# 添加异步HTTP服务，用于接收HTTP任务
+		start_background_tasks() 
+		ui.launch()	
+
 	if state_manager.get_item('command') == 'headless-run':
 		if not job_manager.init_jobs(state_manager.get_item('jobs_path')):
 			hard_exit(1)
@@ -295,6 +394,8 @@ def process_step(job_id : str, step_index : int, step_args : Args) -> bool:
 	step_total = job_manager.count_step_total(job_id)
 	step_args.update(collect_job_args())
 	apply_args(step_args, state_manager.set_item)
+	gStepArgs = step_args
+	print(step_args)
 
 	logger.info(wording.get('processing_step').format(step_current = step_index + 1, step_total = step_total), __name__)
 	if common_pre_check() and processors_pre_check():

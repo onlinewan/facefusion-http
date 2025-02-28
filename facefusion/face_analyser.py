@@ -122,3 +122,22 @@ def get_many_faces(vision_frames : List[VisionFrame]) -> List[Face]:
 						many_faces.extend(faces)
 						set_static_faces(vision_frame, faces)
 	return many_faces
+
+# 从图片中获取人脸信息
+def get_face_info(vision_frame : VisionFrame) -> Face:
+	if numpy.any(vision_frame):
+		all_bounding_boxes = []
+		all_face_scores = []
+		all_face_landmarks_5 = []
+		bounding_boxes, face_scores, face_landmarks_5 = detect_faces(vision_frame)
+		all_bounding_boxes.extend(bounding_boxes)
+		all_face_scores.extend(face_scores)
+		all_face_landmarks_5.extend(face_landmarks_5)
+
+		if all_bounding_boxes and all_face_scores and all_face_landmarks_5:
+			faces = create_faces(vision_frame, all_bounding_boxes, all_face_scores, all_face_landmarks_5)
+			if faces:
+				return get_average_face(faces)
+			
+	return None
+
