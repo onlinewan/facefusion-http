@@ -52,16 +52,16 @@ async def getfaceinfobyHttp(request: Request):
 			face_json = {"gender": face.gender, "age": face.age[0], "race": face.race}
 			print("face is not None. face:" + str(face_json))
 
-			return JSONResponse(content={"status": "success", "msg": face_json})
+			return JSONResponse(content={"status": "success", "msg": "", "data": face_json})
 	else:
 		print("source_path 不能为空")
-		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空或没有人脸"})	
+		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空或没有人脸", "data": None})	
 
 @fastApp.get("/api/swapface")
 async def swapfacebyHttp(request: Request):
 	print("http request swapface..")
 	if lockSwapFaceAPI.acquire(timeout=0) is False:
-		return JSONResponse(content={"status": "failed", "msg":"上一个任务还没有执行完，请稍后再试"})
+		return JSONResponse(content={"status": "failed", "msg":"上一个任务还没有执行完，请稍后再试", "data": None})
 	
 	try:
 		return await _swapfacebyHttp(request)
@@ -81,17 +81,17 @@ async def _swapfacebyHttp(request: Request):
 		state_manager.set_item('source_paths', [source_path])
 	else:
 		print("source_path 不能为空")
-		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空"})	
+		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空", "data": None})	
 	if target_path and len(target_path) != 0:
 		state_manager.set_item('target_path', target_path)
 	else:
 		print("target_path 不能为空")
-		return JSONResponse(content={"status": "failed", "msg":"target_path 不能为空"})
+		return JSONResponse(content={"status": "failed", "msg":"target_path 不能为空", "data": None})
 	if output_path and len(output_path) != 0:
 		state_manager.set_item('output_path', output_path)
 	else:
 		print("output_path 不能为空")
-		return JSONResponse(content={"status": "failed", "msg":"output_path 不能为空"})
+		return JSONResponse(content={"status": "failed", "msg":"output_path 不能为空", "data": None})
 
 	clear_reference_faces()
 	step_args = collect_step_args()
@@ -105,13 +105,13 @@ async def _swapfacebyHttp(request: Request):
 		error_code = conditional_process()
 		if error_code == 0:
 			print("conditional_process success")
-			return JSONResponse(content={"status": "success", "msg":""})
+			return JSONResponse(content={"status": "success", "msg":"", "data": None})
 		else:
 			print("conditional_process return:" + error_code)
-			return JSONResponse(content={"status": "failed", "msg":"conditional_process return:" + error_code})
+			return JSONResponse(content={"status": "failed", "msg":"conditional_process return:" + error_code, "data": None})
 	except Exception as e: 
 		print("conditinal_process exception:" + str(e))
-		return JSONResponse(content={"status": "failed", "msg":"conditinal_process exception:" + str(e)})
+		return JSONResponse(content={"status": "failed", "msg":"conditinal_process exception:" + str(e), "data": None})
 
 
 def run_server():
