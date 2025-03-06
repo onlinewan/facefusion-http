@@ -407,3 +407,24 @@ def process_image(source_path : str, target_path : str, output_path : str) -> No
 
 def process_video(source_paths : List[str], temp_frame_paths : List[str]) -> None:
 	processors.multi_process_frames(None, temp_frame_paths, process_frames)
+
+
+def process_frame_by_oneface(inputs : FaceEnhancerInputs) -> VisionFrame:
+	reference_faces = inputs.get('reference_faces')
+	target_vision_frame = inputs.get('target_vision_frame')
+	many_faces = sort_and_filter_faces(get_many_faces([ target_vision_frame ]))
+
+	target_face = get_one_face(many_faces)
+	if target_face:
+		target_vision_frame = enhance_face(target_face, target_vision_frame)
+	return target_vision_frame
+
+def process_image_by_oneface(source_path : str, target_path : str, output_path : str) -> None:
+	reference_faces = get_reference_faces() if 'reference' in state_manager.get_item('face_selector_mode') else None
+	target_vision_frame = read_static_image(target_path)
+	output_vision_frame = process_frame_by_oneface(
+	{
+		'reference_faces': reference_faces,
+		'target_vision_frame': target_vision_frame
+	})
+	write_image(output_path, output_vision_frame)

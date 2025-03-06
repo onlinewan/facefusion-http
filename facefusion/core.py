@@ -34,12 +34,14 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import threading
 import json
+import shutil
 
-fastApp = FastAPI()
+fastAppFaceInfo = FastAPI()
+fastAppSwapFace = FastAPI()
 
 lockSwapFaceAPI = threading.Lock()
 
-@fastApp.get("/api/getfaceinfo")
+@fastAppFaceInfo.get("/api/getfaceinfo")
 async def getfaceinfobyHttp(request: Request):
 	print("http request getfaceinfo..")
 
@@ -57,8 +59,8 @@ async def getfaceinfobyHttp(request: Request):
 		print("source_path 不能为空")
 		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空或没有人脸", "data": None})	
 
-@fastApp.get("/api/swapface")
-async def swapfacebyHttp(request: Request):
+@fastAppSwapFace.get("/api/swapVideoFace")
+async def swapVideoFacebyHttp(request: Request):
 	print("http request swapface..")
 	if lockSwapFaceAPI.acquire(timeout=0) is False:
 		return JSONResponse(content={"status": "failed", "msg":"上一个任务还没有执行完，请稍后再试", "data": None})
@@ -67,7 +69,44 @@ async def swapfacebyHttp(request: Request):
 		return await _swapfacebyHttp(request)
 	finally:
 		lockSwapFaceAPI.release()
-		
+
+@fastAppSwapFace.get("/api/swapPhotoFace")
+async def swapPhotoFacebyHttp(request: Request):
+	print("http request swapPhotoFace....................................................")
+
+	source_path = request.query_params.get('source_path')
+	target_path = request.query_params.get('target_path')
+	output_path = request.query_params.get('output_path')
+
+	if source_path and len(source_path) == 0:
+		print("source_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"source_path 不能为空", "data": None})	
+	if target_path and len(target_path) == 0:
+		print("target_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"target_path 不能为空", "data": None})
+	if output_path and len(output_path) == 0:
+		print("output_path 不能为空")
+		return JSONResponse(content={"status": "failed", "msg":"output_path 不能为空", "data": None})
+	
+	print("create_temp_directory, and copy target file to temp directory.")
+	create_temp_directory(target_path)
+	temp_file_path = get_temp_file_path(target_path)
+	shutil.copyfile(target_path, temp_file_path)
+	print("process_image_by_oneface")
+	for processor_module in get_processors_modules(['face_swapper', 'face_enhancer']):
+		logger.info(wording.get('processing'), processor_module.__name__)
+		processor_module.process_image_by_oneface([source_path], temp_file_path, temp_file_path)
+		processor_module.post_process()
+	print("finalize_image, copy temp file to output directory, and clear temp directory.")
+	shutil.copyfile(temp_file_path, output_path)
+	clear_temp_directory(temp_file_path)
+	if is_image(output_path):
+		print("swapPhotoFace process success.")
+		return JSONResponse(content={"status": "success", "msg":"swapPhotoFace process success.", "data": None})
+	else:
+		print("swapPhotoFace process error.")
+		return JSONResponse(content={"status": "failed", "msg":"swapPhotoFace process error.", "data": None})
+	
 
 async def _swapfacebyHttp(request: Request):
 	print("call _swapfacebyHttp...")
@@ -93,7 +132,7 @@ async def _swapfacebyHttp(request: Request):
 		print("output_path 不能为空")
 		return JSONResponse(content={"status": "failed", "msg":"output_path 不能为空", "data": None})
 
-	clear_reference_faces()
+	#clear_reference_faces()
 	step_args = collect_step_args()
 	step_args.update(collect_job_args())
 	apply_args(step_args, state_manager.set_item)
@@ -114,13 +153,25 @@ async def _swapfacebyHttp(request: Request):
 		return JSONResponse(content={"status": "failed", "msg":"conditinal_process exception:" + str(e), "data": None})
 
 
-def run_server():
-    uvicorn.run(fastApp, host="127.0.0.1", port=8000, log_level="info")
+def run_server1():
+    uvicorn.run(fastAppSwapFace, host="127.0.0.1", port=8000, log_level="info")
+
+def run_server2():
+    uvicorn.run(fastAppSwapFace, host="127.0.0.1", port=8001, log_level="info")
+
+def run_server3():
+    uvicorn.run(fastAppFaceInfo, host="127.0.0.1", port=8010, log_level="info")
 
 def start_background_tasks():
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
-    print("server_thread.start()")
+    server_thread1 = threading.Thread(target=run_server1, daemon=True)
+    server_thread1.start()
+    print("server_thread1.start()")
+    server_thread2 = threading.Thread(target=run_server2, daemon=True)
+    server_thread2.start()
+    print("server_thread2.start()")
+    server_thread3 = threading.Thread(target=run_server3, daemon=True)
+    server_thread3.start()
+    print("server_thread3.start()")
 
 # http server end ===================================
 

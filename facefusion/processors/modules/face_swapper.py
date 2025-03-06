@@ -567,6 +567,16 @@ def process_frame(inputs : FaceSwapperInputs) -> VisionFrame:
 				target_vision_frame = swap_face(source_face, similar_face, target_vision_frame)
 	return target_vision_frame
 
+def process_frame_by_oneface(inputs : FaceSwapperInputs) -> VisionFrame:
+	reference_faces = inputs.get('reference_faces')
+	source_face = inputs.get('source_face')
+	target_vision_frame = inputs.get('target_vision_frame')
+	many_faces = sort_and_filter_faces(get_many_faces([ target_vision_frame ]))
+
+	target_face = get_one_face(many_faces)
+	if target_face:
+		target_vision_frame = swap_face(source_face, target_face, target_vision_frame)
+	return target_vision_frame
 
 def process_frames(source_paths : List[str], queue_payloads : List[QueuePayload], update_progress : UpdateProgress) -> None:
 	reference_faces = get_reference_faces() if 'reference' in state_manager.get_item('face_selector_mode') else None
@@ -616,3 +626,24 @@ def process_image(source_paths : List[str], target_path : str, output_path : str
 
 def process_video(source_paths : List[str], temp_frame_paths : List[str]) -> None:
 	processors.multi_process_frames(source_paths, temp_frame_paths, process_frames)
+
+
+def process_image_by_oneface(source_paths : List[str], target_path : str, output_path : str) -> None:
+	reference_faces = get_reference_faces() if 'reference' in state_manager.get_item('face_selector_mode') else None
+	source_frames = read_static_images(source_paths)
+	source_faces = []
+
+	for source_frame in source_frames:
+		temp_faces = get_many_faces([ source_frame ])
+		temp_faces = sort_faces_by_order(temp_faces, 'large-small')
+		if temp_faces:
+			source_faces.append(get_first(temp_faces))
+	source_face = get_average_face(source_faces)
+	target_vision_frame = read_static_image(target_path)
+	output_vision_frame = process_frame_by_oneface(
+	{
+		'reference_faces': reference_faces,
+		'source_face': source_face,
+		'target_vision_frame': target_vision_frame
+	})
+	write_image(output_path, output_vision_frame)
